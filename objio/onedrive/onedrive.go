@@ -115,7 +115,8 @@ const (
 	stgInfoQuery = "select=quota"
 	objInfoQuery = "select=" +
 		"name,size,createdDateTime,lastModifiedDateTime,root,folder,file,cTag,deleted"
-	readQuery = objInfoQuery + ",@microsoft.graph.downloadUrl"
+	folderQuery = "select=folder,file,cTag"
+	readQuery   = objInfoQuery + ",@microsoft.graph.downloadUrl"
 )
 
 type onedriveStorageInfo struct {
@@ -538,7 +539,9 @@ func (self *onedrive) sendrecv(odr *onedriveRequest, fn func(*http.Response) err
 		return err
 	}
 
-	if 416 == rsp.StatusCode && "" != odr.header.Get("Range") {
+	if 412 == rsp.StatusCode && "" != odr.header.Get("If-Match") {
+		// special case If-Match requests!
+	} else if 416 == rsp.StatusCode && "" != odr.header.Get("Range") {
 		// special case Range requests!
 	} else if 400 <= rsp.StatusCode {
 		defer rsp.Body.Close()
@@ -721,15 +724,64 @@ func (self *onedrive) Mkdir(prefix string) (info objio.ObjectInfo, err error) {
 }
 
 func (self *onedrive) Rmdir(prefix string) (err error) {
-	return self.Remove(prefix)
+	return self.remove(prefix, true)
 }
 
 func (self *onedrive) Remove(name string) (err error) {
+	return self.remove(name, false)
+}
+
+func (self *onedrive) remove(name string, dir bool) (err error) {
+	var content struct {
+		Sig    string `json:"cTag"`
+		Folder struct {
+			ChildCount int `json:"childCount"`
+		} `json:"folder"`
+		File presence `json:"file"`
+	}
+
 	odr := onedriveRequest{
-		method: "DELETE",
-		uri:    self.requestUri("", "", name),
+		method: "GET",
+		uri:    self.requestUri("", folderQuery, name),
 	}
 	err = self.sendrecv(&odr, func(rsp *http.Response) error {
+		return json.NewDecoder(rsp.Body).Decode(&content)
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+		return
+	}
+
+	var header http.Header
+	if dir {
+		if content.File {
+			err = errors.New("", err, errno.ENOTDIR)
+			return
+		}
+		if 0 < content.Folder.ChildCount {
+			err = errors.New("", err, errno.ENOTEMPTY)
+			return
+		}
+
+		// comment the following lines as OneDrive seems to fail with 500 otherwise
+		// header = http.Header{}
+		// header.Add("If-Match", content.Sig)
+	} else {
+		if !content.File || 0 < content.Folder.ChildCount {
+			err = errors.New("", err, errno.EISDIR)
+			return
+		}
+	}
+
+	odr = onedriveRequest{
+		method: "DELETE",
+		uri:    self.requestUri("", "", name),
+		header: header,
+	}
+	err = self.sendrecv(&odr, func(rsp *http.Response) error {
+		if 412 == rsp.StatusCode {
+			return errno.ENOTEMPTY
+		}
 		return nil
 	})
 	if nil != err {
