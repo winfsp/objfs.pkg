@@ -111,11 +111,11 @@ func (v *presence) UnmarshalJSON([]byte) error {
 }
 
 const (
-	idQuery      = "select=id"
 	stgInfoQuery = "select=quota"
 	objInfoQuery = "select=" +
 		"name,size,createdDateTime,lastModifiedDateTime,root,folder,file,cTag,deleted"
-	folderQuery = "select=folder,file,cTag"
+	removeQuery = "select=folder,file,cTag"
+	renameQuery = "select=id"
 	readQuery   = objInfoQuery + ",@microsoft.graph.downloadUrl"
 )
 
@@ -742,7 +742,7 @@ func (self *onedrive) remove(name string, dir bool) (err error) {
 
 	odr := onedriveRequest{
 		method: "GET",
-		uri:    self.requestUri("", folderQuery, name),
+		uri:    self.requestUri("", removeQuery, name),
 	}
 	err = self.sendrecv(&odr, func(rsp *http.Response) error {
 		return json.NewDecoder(rsp.Body).Decode(&content)
@@ -796,7 +796,7 @@ func (self *onedrive) Rename(oldname string, newname string) (err error) {
 	dir, newname := path.Split(newname)
 	odr := onedriveRequest{
 		method: "GET",
-		uri:    self.requestUri("", idQuery, dir),
+		uri:    self.requestUri("", renameQuery, dir),
 	}
 	err = self.sendrecv(&odr, func(rsp *http.Response) error {
 		var content struct {
