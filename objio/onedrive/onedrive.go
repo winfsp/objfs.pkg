@@ -114,9 +114,10 @@ const (
 	stgInfoQuery = "select=quota"
 	objInfoQuery = "select=" +
 		"name,size,createdDateTime,lastModifiedDateTime,root,folder,file,cTag,deleted"
-	removeQuery = "select=folder,file,cTag"
-	renameQuery = "select=id"
-	readQuery   = objInfoQuery + ",@microsoft.graph.downloadUrl"
+	removeQuery   = "select=folder,file,cTag"
+	renameQuery   = "select=id,parentReference,file,cTag"
+	renameIdQuery = "select=id"
+	readQuery     = objInfoQuery + ",@microsoft.graph.downloadUrl"
 )
 
 type onedriveStorageInfo struct {
@@ -733,11 +734,11 @@ func (self *onedrive) Remove(name string) (err error) {
 
 func (self *onedrive) remove(name string, dir bool) (err error) {
 	var content struct {
-		Sig    string `json:"cTag"`
 		Folder struct {
 			ChildCount int `json:"childCount"`
 		} `json:"folder"`
 		File presence `json:"file"`
+		Sig  string   `json:"cTag"`
 	}
 
 	odr := onedriveRequest{
@@ -792,48 +793,75 @@ func (self *onedrive) remove(name string, dir bool) (err error) {
 }
 
 func (self *onedrive) Rename(oldname string, newname string) (err error) {
-	var newparent string
-	dir, newname := path.Split(newname)
-	odr := onedriveRequest{
-		method: "GET",
-		uri:    self.requestUri("", renameQuery, dir),
-	}
-	err = self.sendrecv(&odr, func(rsp *http.Response) error {
-		var content struct {
+	var content struct {
+		ParentReference struct {
 			Id string `json:"id"`
 		}
+		File presence `json:"file"`
+		Sig  string   `json:"cTag"`
+	}
 
-		err := json.NewDecoder(rsp.Body).Decode(&content)
-		if nil != err {
-			return err
-		}
-		newparent = content.Id
-		return nil
+	odr := onedriveRequest{
+		method: "GET",
+		uri:    self.requestUri("", renameQuery, newname),
+	}
+	err = self.sendrecv(&odr, func(rsp *http.Response) error {
+		return json.NewDecoder(rsp.Body).Decode(&content)
 	})
+
+	dir, newname := path.Split(newname)
+	if nil == err {
+		// disallow renaming over existing directories! (NOTE: POSIX allows this!)
+		if !content.File {
+			err = errors.New("", err, errno.EISDIR)
+			return
+		}
+	} else if errors.HasAttachment(err, errno.ENOENT) {
+		odr := onedriveRequest{
+			method: "GET",
+			uri:    self.requestUri("", renameIdQuery, dir),
+		}
+		err = self.sendrecv(&odr, func(rsp *http.Response) error {
+			var idcontent struct {
+				Id string `json:"id"`
+			}
+
+			err := json.NewDecoder(rsp.Body).Decode(&idcontent)
+			if nil == err {
+				content.ParentReference.Id = idcontent.Id
+			}
+
+			return err
+		})
+	}
+
 	if nil != err {
 		err = errors.New("", err, errno.EIO)
 		return
 	}
 
-	var content = struct {
+	var newcontent = struct {
 		Name            codedName `json:"name"`
 		ParentReference struct {
 			Id string `json:"id"`
 		} `json:"parentReference"`
+		Conflict string `json:"@microsoft.graph.conflictBehavior"`
 	}{
 		Name: codedName(newname),
 		ParentReference: struct {
 			Id string `json:"id"`
 		}{
-			Id: newparent,
+			Id: content.ParentReference.Id,
 		},
+		Conflict: "replace",
 	}
 
 	var body bytes.Buffer
-	err = json.NewEncoder(&body).Encode(&content)
+	err = json.NewEncoder(&body).Encode(&newcontent)
 	if nil != err {
 		return
 	}
+
 	odr = onedriveRequest{
 		method: "PATCH",
 		uri:    self.requestUri("", "", oldname),
