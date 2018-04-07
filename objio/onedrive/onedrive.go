@@ -809,14 +809,18 @@ func (self *onedrive) Rename(oldname string, newname string) (err error) {
 		return json.NewDecoder(rsp.Body).Decode(&content)
 	})
 
-	dir, newname := path.Split(newname)
 	if nil == err {
 		// disallow renaming over existing directories! (NOTE: POSIX allows this!)
-		if !content.File {
+		if !bool(content.File) && !strings.EqualFold(oldname, newname) {
 			err = errors.New("", err, errno.EISDIR)
 			return
 		}
+
+		_, newname = path.Split(newname)
 	} else if errors.HasAttachment(err, errno.ENOENT) {
+		var dir string
+		dir, newname = path.Split(newname)
+
 		odr := onedriveRequest{
 			method: "GET",
 			uri:    self.requestUri("", renameIdQuery, dir),
