@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"path"
@@ -184,11 +183,29 @@ func (info *onedriveObjectInfo) Sig() string {
 	return info.FSig
 }
 
+type ioReadSeekCloser interface {
+	io.Reader
+	io.Seeker
+	io.Closer
+}
+
+type onedriveRequestBody struct {
+	*bytes.Reader
+}
+
+func (*onedriveRequestBody) Close() error {
+	return nil
+}
+
+func requestBody(buf *bytes.Buffer) ioReadSeekCloser {
+	return &onedriveRequestBody{bytes.NewReader(buf.Bytes())}
+}
+
 type onedriveRequest struct {
 	method          string
 	uri             *url.URL
 	header          http.Header
-	body            io.ReadCloser
+	body            ioReadSeekCloser
 	noAuthorization bool
 	noRedirect      bool
 	noBodyClose     bool
@@ -288,7 +305,7 @@ func (self *onedriveWriter) uploadSmall() (err error) {
 		method: "PUT",
 		uri:    self.owner.requestUri("/content", "", self.name),
 		header: header,
-		body:   ioutil.NopCloser(&self.body),
+		body:   requestBody(&self.body),
 	}
 	err = self.owner.sendrecv(&odr, func(rsp *http.Response) error {
 		if 200 > rsp.StatusCode || rsp.StatusCode > 201 {
@@ -337,7 +354,7 @@ func (self *onedriveWriter) uploadLarge() (err error) {
 		odr := onedriveRequest{
 			method: "POST",
 			uri:    self.owner.requestUri("/createUploadSession", "", self.name),
-			body:   ioutil.NopCloser(&body),
+			body:   requestBody(&body),
 		}
 		err = self.owner.sendrecv(&odr, func(rsp *http.Response) error {
 			var content struct {
@@ -370,7 +387,7 @@ func (self *onedriveWriter) uploadLarge() (err error) {
 		method:          "PUT",
 		uri:             self.uploadUri,
 		header:          header,
-		body:            ioutil.NopCloser(&self.body),
+		body:            requestBody(&self.body),
 		noAuthorization: false,
 	}
 	err = self.owner.sendrecv(&odr, func(rsp *http.Response) error {
@@ -535,7 +552,9 @@ func (self *onedrive) sendrecv(odr *onedriveRequest, fn func(*http.Response) err
 		defer httputil.AllowRedirect(req, true)
 	}
 
-	rsp, err := self.httpClient.Do(req)
+	rsp, err := httputil.Retry(odr.body, func() (*http.Response, error) {
+		return self.httpClient.Do(req)
+	})
 	if nil != err {
 		return err
 	}
@@ -706,7 +725,7 @@ func (self *onedrive) Mkdir(prefix string) (info objio.ObjectInfo, err error) {
 	odr := onedriveRequest{
 		method: "POST",
 		uri:    self.requestUri("/children", "", dir),
-		body:   ioutil.NopCloser(&body),
+		body:   requestBody(&body),
 	}
 	err = self.sendrecv(&odr, func(rsp *http.Response) error {
 		var content onedriveObjectInfo
@@ -869,7 +888,7 @@ func (self *onedrive) Rename(oldname string, newname string) (err error) {
 	odr = onedriveRequest{
 		method: "PATCH",
 		uri:    self.requestUri("", "", oldname),
-		body:   ioutil.NopCloser(&body),
+		body:   requestBody(&body),
 	}
 	err = self.sendrecv(&odr, func(rsp *http.Response) error {
 		return nil

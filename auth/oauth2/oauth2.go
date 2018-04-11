@@ -225,7 +225,10 @@ func (self *oauth2) getAccessToken(
 	}
 	tokenUri.RawQuery = ""
 
-	rsp, err := self.httpClient.PostForm(tokenUri.String(), values)
+	body := strings.NewReader(values.Encode())
+	rsp, err := httputil.Retry(body, func() (*http.Response, error) {
+		return self.httpClient.Post(tokenUri.String(), "application/x-www-form-urlencoded", body)
+	})
 	if nil != err {
 		return nil, err
 	}
