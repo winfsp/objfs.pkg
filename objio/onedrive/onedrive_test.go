@@ -26,7 +26,7 @@ import (
 )
 
 func TestOneDrive(t *testing.T) {
-	cmap, err := auth.ReadCredentials("../../_test.onedrive_token")
+	cmap, err := auth.ReadCredentials("../../../../../../_test.onedrive_token")
 	if nil != err {
 		cmap, err = auth.ReadCredentials("keyring:objfs/onedrive_client_secret")
 		if nil != err {
