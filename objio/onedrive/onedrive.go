@@ -959,7 +959,7 @@ func (self *onedrive) OpenWrite(name string, size int64) (writer objio.WriteWait
 // New creates an object that can access onedrive storage.
 func New(args ...interface{}) (interface{}, error) {
 	var (
-		graphUri   *url.URL
+		uristr     string
 		session    auth.Session
 		creds      auth.CredentialMap
 		httpClient = httputil.DefaultClient
@@ -968,13 +968,7 @@ func New(args ...interface{}) (interface{}, error) {
 	for _, arg := range args {
 		switch a := arg.(type) {
 		case string:
-			uri, err := url.Parse(a)
-			if nil != err {
-				return nil, errors.New(": invalid uri "+a, err, errno.EINVAL)
-			}
-			if nil == graphUri {
-				graphUri = uri
-			}
+			uristr = a
 		case auth.Session:
 			session = a
 		case auth.CredentialMap:
@@ -984,15 +978,23 @@ func New(args ...interface{}) (interface{}, error) {
 		}
 	}
 
-	if nil == graphUri {
-		return nil, errors.New(": missing graphUri", nil, errno.EINVAL)
+	if "" == uristr {
+		uristr = "https://graph.microsoft.com/v1.0/me/drive"
+	}
+	graphUri, err := url.Parse(uristr)
+	if nil != err {
+		return nil, errors.New(": invalid uri "+uristr, err, errno.EINVAL)
 	}
 
 	if nil == session {
 		if nil == creds {
 			creds = auth.CredentialMap{}
 		}
-		s, err := authSession(httpClient, creds)
+		a, err := NewAuth(httpClient)
+		if nil != err {
+			return nil, errors.New("", err, errno.EACCES)
+		}
+		s, err := a.(auth.Auth).Session(creds)
 		if nil != err {
 			return nil, errors.New("", err, errno.EACCES)
 		}
@@ -1008,24 +1010,14 @@ func New(args ...interface{}) (interface{}, error) {
 	return self, nil
 }
 
-var _ objio.ObjectStorage = (*onedrive)(nil)
-
-const DefaultUri = "https://graph.microsoft.com/v1.0/me/drive"
-
-func authSession(httpClient *http.Client, creds auth.CredentialMap) (auth.Session, error) {
-	a, err := auth.Registry.NewObject("oauth2", httpClient,
+func NewAuth(args ...interface{}) (interface{}, error) {
+	args = append(args,
 		"https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
 		"https://login.microsoftonline.com/common/oauth2/v2.0/token")
-	if nil != err {
-		return nil, err
-	}
-
-	return a.(auth.Auth).Session(creds)
+	return auth.Registry.NewObject("oauth2", args...)
 }
 
-func AuthSession(creds auth.CredentialMap) (auth.Session, error) {
-	return authSession(httputil.DefaultClient, creds)
-}
+var _ objio.ObjectStorage = (*onedrive)(nil)
 
 // Load is used to ensure that this package is linked.
 func Load() {
@@ -1033,5 +1025,6 @@ func Load() {
 }
 
 func init() {
+	auth.Registry.RegisterFactory("onedrive", NewAuth)
 	objio.Registry.RegisterFactory("onedrive", New)
 }
