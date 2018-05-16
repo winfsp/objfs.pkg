@@ -56,7 +56,10 @@ func credCopy(ocreds auth.CredentialMap, icreds auth.CredentialMap, name string)
 
 func credSetDeadline(creds auth.CredentialMap, now time.Time) {
 	v := creds.Get("expires_in")
-	i, _ := strconv.ParseInt(v, 10, 64)
+	i, err := strconv.ParseInt(v, 10, 64)
+	if nil != err {
+		return
+	}
 	d := now.Add(time.Duration(i) * time.Second)
 	now = time.Now()
 	if d.Before(now) {
@@ -234,8 +237,15 @@ func (self *oauth2) getAccessToken(
 	}
 	defer rsp.Body.Close()
 
-	if (200 != rsp.StatusCode && 400 != rsp.StatusCode) ||
-		!strings.HasPrefix(rsp.Header.Get("Content-type"), "application/json") {
+	rspOk := false
+	if 200 == rsp.StatusCode || 400 == rsp.StatusCode {
+		contentType := rsp.Header.Get("Content-type")
+		if strings.HasPrefix(contentType, "application/json") ||
+			strings.HasPrefix(contentType, "text/javascript") {
+			rspOk = true
+		}
+	}
+	if !rspOk {
 		return nil, errors.New(": bad HTTP status or content-type", nil, errno.EACCES)
 	}
 
