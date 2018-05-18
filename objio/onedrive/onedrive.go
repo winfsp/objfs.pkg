@@ -772,7 +772,6 @@ func (self *onedrive) remove(name string, dir bool) (err error) {
 		return
 	}
 
-	var header http.Header
 	if dir {
 		if content.File {
 			err = errors.New("", err, errno.ENOTDIR)
@@ -782,16 +781,15 @@ func (self *onedrive) remove(name string, dir bool) (err error) {
 			err = errors.New("", err, errno.ENOTEMPTY)
 			return
 		}
-
-		// comment the following lines as OneDrive seems to fail with 500 otherwise
-		// header = http.Header{}
-		// header.Add("If-Match", content.Sig)
 	} else {
 		if !content.File || 0 < content.Folder.ChildCount {
 			err = errors.New("", err, errno.EISDIR)
 			return
 		}
 	}
+
+	header := http.Header{}
+	header.Add("If-Match", content.Sig)
 
 	odr = onedriveRequest{
 		method: "DELETE",
