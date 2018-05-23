@@ -55,10 +55,6 @@ type dropbox struct {
 }
 
 func (self *dropbox) sendrecv(dbr *dropboxRequest, fn func(*http.Response) error) error {
-	if nil == dbr.apiError {
-		panic(errno.EINVAL)
-	}
-
 	header := http.Header{}
 	if nil != dbr.header {
 		for k, v := range dbr.header {
@@ -111,11 +107,12 @@ func (self *dropbox) sendrecv(dbr *dropboxRequest, fn func(*http.Response) error
 		case 429:
 			errcode = errno.ENOSPC //errno.EDQUOT
 		case 409:
-			if !strings.HasPrefix(rsp.Header.Get("Content-type"), "application/json") {
+			if nil == dbr.apiError ||
+				!strings.HasPrefix(rsp.Header.Get("Content-type"), "application/json") {
 				break
 			}
 
-			err = json.NewDecoder(rsp.Body).Decode(&dbr.apiError)
+			err = json.NewDecoder(rsp.Body).Decode(dbr.apiError)
 			if nil != err {
 				break
 			}
