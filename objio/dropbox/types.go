@@ -383,6 +383,7 @@ type spaceUsage struct {
 
 type spaceAllocation struct {
 	Tag        string                     `json:".tag"`
+	Allocated  uint64                     `json:"allocated"`
 	Individual *individualSpaceAllocation `json:"individual"`
 	Team       *teamSpaceAllocation       `json:"team"`
 }

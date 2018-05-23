@@ -186,10 +186,7 @@ func (self *dropbox) Info(getsize bool) (info objio.StorageInfo, err error) {
 
 		stginfo := &dropboxStorageInfo{}
 		if nil != content.Allocation {
-			if nil != content.Allocation.Individual {
-				stginfo.totalSize = content.Allocation.Individual.Allocated
-				stginfo.freeSize = stginfo.totalSize - content.Used
-			} else if nil != content.Allocation.Team {
+			if nil != content.Allocation.Team {
 				stginfo.totalSize = content.Allocation.Team.UserWithinTeamSpaceAllocated
 				if 0 != stginfo.totalSize {
 					stginfo.freeSize = stginfo.totalSize - content.Used
@@ -197,6 +194,12 @@ func (self *dropbox) Info(getsize bool) (info objio.StorageInfo, err error) {
 					stginfo.totalSize = content.Allocation.Team.Allocated
 					stginfo.freeSize = stginfo.totalSize - content.Allocation.Team.Used
 				}
+			} else if nil != content.Allocation.Individual {
+				stginfo.totalSize = content.Allocation.Individual.Allocated
+				stginfo.freeSize = stginfo.totalSize - content.Used
+			} else if 0 != content.Allocation.Allocated {
+				stginfo.totalSize = content.Allocation.Allocated
+				stginfo.freeSize = stginfo.totalSize - content.Used
 			}
 		}
 
