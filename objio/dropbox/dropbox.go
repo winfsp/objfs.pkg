@@ -44,6 +44,7 @@ type dropboxRequest struct {
 	header      http.Header
 	body        ioReadSeekCloser
 	noBodyClose bool
+	apiError    interface{}
 }
 
 type dropbox struct {
@@ -53,28 +54,11 @@ type dropbox struct {
 	httpClient *http.Client
 }
 
-var errnomap = map[string]errno.Errno{
-	"conflict":                  errno.EEXIST,
-	"disallowed_name":           errno.EPERM,
-	"insufficient_space":        errno.ENOSPC,
-	"invalid_access_token":      errno.EACCES,
-	"invalid_account_type":      errno.EACCES,
-	"invalid_select_admin":      errno.EACCES,
-	"invalid_select_user":       errno.EACCES,
-	"no_write_permission":       errno.EACCES,
-	"not_file":                  errno.EISDIR,
-	"not_folder":                errno.ENOTDIR,
-	"not_found":                 errno.ENOENT,
-	"paper_access_denied":       errno.EACCES,
-	"restricted_content":        errno.EACCES,
-	"team_folder":               errno.EPERM,
-	"too_many_files":            errno.ENOSPC, //errno.EDQUOT,
-	"too_many_requests":         errno.ENOSPC, //errno.EDQUOT,
-	"too_many_write_operations": errno.ENOSPC, //errno.EDQUOT,
-	"user_suspended":            errno.EACCES,
-}
-
 func (self *dropbox) sendrecv(dbr *dropboxRequest, fn func(*http.Response) error) error {
+	if nil == dbr.apiError {
+		panic(errno.EINVAL)
+	}
+
 	header := http.Header{}
 	if nil != dbr.header {
 		for k, v := range dbr.header {
@@ -121,42 +105,28 @@ func (self *dropbox) sendrecv(dbr *dropboxRequest, fn func(*http.Response) error
 
 		errmesg := ""
 		errcode := errno.EIO
-
-		if strings.HasPrefix(rsp.Header.Get("Content-type"), "application/json") {
-			var content struct {
-				ErrorSummary string                 `json:"error_summary"`
-				Error        map[string]interface{} `json:"error"`
+		switch rsp.StatusCode {
+		case 401, 403:
+			errcode = errno.EACCES
+		case 429:
+			errcode = errno.ENOSPC //errno.EDQUOT
+		case 409:
+			if !strings.HasPrefix(rsp.Header.Get("Content-type"), "application/json") {
+				break
 			}
 
-			err = json.NewDecoder(rsp.Body).Decode(&content)
+			err = json.NewDecoder(rsp.Body).Decode(&dbr.apiError)
 			if nil != err {
-				errmesg = fmt.Sprintf("HTTP %d", rsp.StatusCode)
-			} else {
-				errmesg = fmt.Sprintf("HTTP %d: %s", rsp.StatusCode,
-					content.ErrorSummary)
-
-				for errmap := content.Error; 0 < len(errmap); {
-					tag, ok := errmap[".tag"].(string)
-					if ok {
-						if rc, ok := errnomap[tag]; ok {
-							errcode = rc
-							break
-						}
-					}
-
-					e, ok := errmap[tag]
-					errmap = nil
-					if ok && ".tag" != tag {
-						switch t := e.(type) {
-						case map[string]interface{}:
-							errmap = t
-						case string:
-							errmap = map[string]interface{}{".tag": t}
-						}
-					}
-				}
+				break
 			}
-		} else {
+
+			if e, ok := dbr.apiError.(apiError); ok {
+				errmesg = fmt.Sprintf("HTTP %d: %s", rsp.StatusCode, e.Message())
+				errcode = e.Errno()
+			}
+		}
+
+		if "" == errmesg {
 			errmesg = fmt.Sprintf("HTTP %d", rsp.StatusCode)
 		}
 
