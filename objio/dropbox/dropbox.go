@@ -33,6 +33,31 @@ import (
 	"github.com/billziss-gh/objfs/objio"
 )
 
+type dropboxStorageInfo struct {
+	totalSize uint64
+	freeSize  uint64
+}
+
+func (self *dropboxStorageInfo) IsCaseInsensitive() bool {
+	return true
+}
+
+func (self *dropboxStorageInfo) IsReadOnly() bool {
+	return false
+}
+
+func (self *dropboxStorageInfo) MaxComponentLength() int {
+	return 255 // !!!: just a guess!
+}
+
+func (self *dropboxStorageInfo) TotalSize() int64 {
+	return int64(self.totalSize)
+}
+
+func (self *dropboxStorageInfo) FreeSize() int64 {
+	return int64(self.freeSize)
+}
+
 type ioReadSeekCloser interface {
 	io.Reader
 	io.Seeker
@@ -138,6 +163,45 @@ func (self *dropbox) sendrecv(dbr *dropboxRequest, fn func(*http.Response) error
 }
 
 func (self *dropbox) Info(getsize bool) (info objio.StorageInfo, err error) {
+	if !getsize {
+		info = &dropboxStorageInfo{}
+		return
+	}
+
+	dbr := dropboxRequest{
+		uri: self.rpcUri,
+	}
+	err = self.sendrecv(&dbr, func(rsp *http.Response) error {
+		var content spaceUsage
+
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+
+		stginfo := &dropboxStorageInfo{}
+		if nil != content.Allocation {
+			if nil != content.Allocation.Individual {
+				stginfo.totalSize = content.Allocation.Individual.Allocated
+				stginfo.freeSize = stginfo.totalSize - content.Used
+			} else if nil != content.Allocation.Team {
+				stginfo.totalSize = content.Allocation.Team.UserWithinTeamSpaceAllocated
+				if 0 != stginfo.totalSize {
+					stginfo.freeSize = stginfo.totalSize - content.Used
+				} else {
+					stginfo.totalSize = content.Allocation.Team.Allocated
+					stginfo.freeSize = stginfo.totalSize - content.Allocation.Team.Used
+				}
+			}
+		}
+
+		info = stginfo
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
 	return
 }
 

@@ -373,3 +373,31 @@ func (e *writeError) Errno() (errc errno.Errno) {
 		return errno.EIO
 	}
 }
+
+// API types
+
+type spaceUsage struct {
+	Used       uint64           `json:"used"`
+	Allocation *spaceAllocation `json:"allocation"`
+}
+
+type spaceAllocation struct {
+	Tag        string                     `json:".tag"`
+	Individual *individualSpaceAllocation `json:"individual"`
+	Team       *teamSpaceAllocation       `json:"team"`
+}
+
+type individualSpaceAllocation struct {
+	Allocated uint64 `json:"allocated"`
+}
+
+type teamSpaceAllocation struct {
+	Used                         uint64                `json:"used"`
+	Allocated                    uint64                `json:"allocated"`
+	UserWithinTeamSpaceAllocated uint64                `json:"user_within_team_space_allocated"`
+	UserWithinTeamSpaceLimitType *memberSpaceLimitType `json:"user_within_team_space_limit_type"`
+}
+
+type memberSpaceLimitType struct {
+	Tag string `json:".tag"`
+}
