@@ -262,6 +262,11 @@ func (self *oauth2) getAccessToken(
 		return nil, errors.New(": oauth2 error: "+errcode, nil, errno.EACCES)
 	}
 
+	// Some OAuth 2.0 providers return "bearer" instead of "Bearer".
+	if strings.EqualFold("Bearer", ocreds.Get("token_type")) {
+		ocreds["token_type"] = "Bearer"
+	}
+
 	return ocreds, nil
 }
 
