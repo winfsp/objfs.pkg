@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/billziss-gh/golib/errors"
@@ -66,6 +67,7 @@ type ioReadSeekCloser interface {
 
 type dropboxRequest struct {
 	uri         *url.URL
+	path        string
 	header      http.Header
 	body        ioReadSeekCloser
 	noBodyClose bool
@@ -96,9 +98,11 @@ func (self *dropbox) sendrecv(dbr *dropboxRequest, fn func(*http.Response) error
 		header.Add("Authorization", creds.Get("token_type")+" "+creds.Get("access_token"))
 	}
 
+	uri := *dbr.uri
+	uri.Path = path.Join(uri.Path, dbr.path)
 	req := &http.Request{
 		Method:     "POST",
-		URL:        dbr.uri,
+		URL:        &uri,
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
@@ -108,7 +112,7 @@ func (self *dropbox) sendrecv(dbr *dropboxRequest, fn func(*http.Response) error
 	}
 
 	// change to "GET" to allow for "Range" header
-	if strings.HasSuffix(req.URL.Path, "/files/download") {
+	if "/files/download" == dbr.path {
 		req.Method = "GET"
 	}
 
@@ -169,7 +173,8 @@ func (self *dropbox) Info(getsize bool) (info objio.StorageInfo, err error) {
 	}
 
 	dbr := dropboxRequest{
-		uri: self.rpcUri,
+		uri:  self.rpcUri,
+		path: "/users/get_space_usage",
 	}
 	err = self.sendrecv(&dbr, func(rsp *http.Response) error {
 		var content spaceUsage
