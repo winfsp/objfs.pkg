@@ -402,3 +402,19 @@ type teamSpaceAllocation struct {
 type memberSpaceLimitType struct {
 	Tag string `json:".tag"`
 }
+
+type listFolderResult struct {
+	Entries []*dropboxObjectInfo `json:"entries"`
+	Cursor  string               `json:"cursor"`
+	HasMore bool                 `json:"has_more"`
+}
+
+type symlinkInfo struct {
+	Target string `json:"target"`
+}
+
+type sharingInfo struct {
+	ReadOnly     bool `json:"read_only"`     // files and folders
+	TraverseOnly bool `json:"traverse_only"` // folders only
+	NoAccess     bool `json:"no_access"`     // folders only
+}

@@ -18,6 +18,7 @@
 package dropbox
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/billziss-gh/golib/errors"
 	"github.com/billziss-gh/objfs.pkg/auth/oauth2"
@@ -33,6 +35,8 @@ import (
 	"github.com/billziss-gh/objfs/httputil"
 	"github.com/billziss-gh/objfs/objio"
 )
+
+var dropboxStartTime = time.Now()
 
 type dropboxStorageInfo struct {
 	totalSize uint64
@@ -59,10 +63,70 @@ func (self *dropboxStorageInfo) FreeSize() int64 {
 	return int64(self.freeSize)
 }
 
+type dropboxObjectInfo struct {
+	Tag          string       `json:".tag"`
+	FName        string       `json:"name"`            // files and folders
+	FMtime       time.Time    `json:"server_modified"` // files only
+	FRev         string       `json:"rev"`             // files only
+	FSize        uint64       `json:"size"`            // files only
+	FSymlinkInfo *symlinkInfo `json:"symlink_info"`    // files only
+	FSharingInfo *sharingInfo `json:"sharing_info"`    // files and folders
+}
+
+func (info *dropboxObjectInfo) Name() string {
+	if "" == info.FName {
+		return "/"
+	}
+	return info.FName
+}
+
+func (info *dropboxObjectInfo) Size() int64 {
+	return int64(info.FSize)
+}
+
+func (info *dropboxObjectInfo) Btime() time.Time {
+	return info.Mtime()
+}
+
+func (info *dropboxObjectInfo) Mtime() time.Time {
+	if info.IsDir() {
+		return dropboxStartTime
+	}
+	return info.FMtime
+}
+
+func (info *dropboxObjectInfo) IsDir() bool {
+	return "folder" == info.Tag
+}
+
+func (info *dropboxObjectInfo) Sig() string {
+	return "W/" + info.FRev
+}
+
 type ioReadSeekCloser interface {
 	io.Reader
 	io.Seeker
 	io.Closer
+}
+
+type dropboxRequestBody struct {
+	*bytes.Reader
+}
+
+func (*dropboxRequestBody) Close() error {
+	return nil
+}
+
+func requestBody(buf *bytes.Buffer) ioReadSeekCloser {
+	return &dropboxRequestBody{bytes.NewReader(buf.Bytes())}
+}
+
+func filePath(p string) string {
+	if "/" == p {
+		return ""
+	}
+
+	return path.Join("/", p)
 }
 
 type dropboxRequest struct {
@@ -216,6 +280,83 @@ func (self *dropbox) Info(getsize bool) (info objio.StorageInfo, err error) {
 func (self *dropbox) List(
 	prefix string, imarker string, maxcount int) (
 	omarker string, infos []objio.ObjectInfo, err error) {
+
+	var path string
+	var body bytes.Buffer
+
+	if "" == imarker {
+		path = "/files/list_folder"
+
+		var content = struct {
+			Path  string `json:"path"`
+			Limit uint32 `json:"limit,omitempty"`
+		}{
+			filePath(prefix),
+			0,
+		}
+
+		if 0 < maxcount {
+			content.Limit = uint32(maxcount)
+		} else {
+			maxcount = -1
+		}
+
+		err = json.NewEncoder(&body).Encode(&content)
+		if nil != err {
+			return
+		}
+
+	} else {
+		path = "/files/list_folder/continue"
+		maxcount = -1
+
+		var content = struct {
+			Cursor string `json:"cursor"`
+		}{
+			imarker,
+		}
+
+		err = json.NewEncoder(&body).Encode(&content)
+		if nil != err {
+			return
+		}
+	}
+
+	var apiError listFolderApiError
+	dbr := dropboxRequest{
+		uri:      self.rpcUri,
+		path:     path,
+		body:     requestBody(&body),
+		apiError: &apiError,
+	}
+	err = self.sendrecv(&dbr, func(rsp *http.Response) error {
+		var content listFolderResult
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+		if content.HasMore {
+			omarker = content.Cursor
+		}
+		infos = make([]objio.ObjectInfo, len(content.Entries))
+		i := 0
+		for _, v := range content.Entries {
+			if maxcount == i {
+				break
+			}
+			if "file" != v.Tag && "folder" != v.Tag {
+				continue
+			}
+			infos[i] = v
+			i++
+		}
+		infos = infos[:i]
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
 	return
 }
 
