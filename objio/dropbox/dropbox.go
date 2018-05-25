@@ -283,9 +283,11 @@ func (self *dropbox) List(
 
 	var path string
 	var body bytes.Buffer
+	var apiError interface{}
 
 	if "" == imarker {
 		path = "/files/list_folder"
+		apiError = &listFolderApiError{}
 
 		var content = struct {
 			Path  string `json:"path"`
@@ -305,9 +307,9 @@ func (self *dropbox) List(
 		if nil != err {
 			return
 		}
-
 	} else {
 		path = "/files/list_folder/continue"
+		apiError = &listFolderContinueApiError{}
 		maxcount = -1
 
 		var content = struct {
@@ -322,12 +324,11 @@ func (self *dropbox) List(
 		}
 	}
 
-	var apiError listFolderApiError
 	dbr := dropboxRequest{
 		uri:      self.rpcUri,
 		path:     path,
 		body:     requestBody(&body),
-		apiError: &apiError,
+		apiError: apiError,
 	}
 	err = self.sendrecv(&dbr, func(rsp *http.Response) error {
 		var content listFolderResult
