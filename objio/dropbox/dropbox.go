@@ -362,6 +362,37 @@ func (self *dropbox) List(
 }
 
 func (self *dropbox) Stat(name string) (info objio.ObjectInfo, err error) {
+	var content = struct {
+		Path string `json:"path"`
+	}{
+		filePath(name),
+	}
+
+	var body bytes.Buffer
+	err = json.NewEncoder(&body).Encode(&content)
+	if nil != err {
+		return
+	}
+
+	dbr := dropboxRequest{
+		uri:      self.rpcUri,
+		path:     "/files/get_metadata",
+		body:     requestBody(&body),
+		apiError: &getMetadataApiError{},
+	}
+	err = self.sendrecv(&dbr, func(rsp *http.Response) error {
+		var content dropboxObjectInfo
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+		info = &content
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
 	return
 }
 
