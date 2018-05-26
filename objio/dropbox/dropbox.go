@@ -100,6 +100,9 @@ func (info *dropboxObjectInfo) IsDir() bool {
 }
 
 func (info *dropboxObjectInfo) Sig() string {
+	if info.IsDir() {
+		return ""
+	}
 	return "W/" + info.FRev
 }
 
