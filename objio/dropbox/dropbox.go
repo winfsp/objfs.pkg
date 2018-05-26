@@ -400,6 +400,44 @@ func (self *dropbox) Stat(name string) (info objio.ObjectInfo, err error) {
 }
 
 func (self *dropbox) Mkdir(prefix string) (info objio.ObjectInfo, err error) {
+	var content = struct {
+		Path string `json:"path"`
+	}{
+		filePath(prefix),
+	}
+
+	var body bytes.Buffer
+	err = json.NewEncoder(&body).Encode(&content)
+	if nil != err {
+		return
+	}
+
+	dbr := dropboxRequest{
+		uri:      self.rpcUri,
+		path:     "/files/create_folder_v2",
+		body:     requestBody(&body),
+		apiError: &createFolderV2ApiError{},
+	}
+	err = self.sendrecv(&dbr, func(rsp *http.Response) error {
+		var content createFolderResult
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+		if nil == content.Metadata {
+			_, name := path.Split(prefix)
+			content.Metadata = &dropboxObjectInfo{
+				FName: name,
+			}
+		}
+		content.Metadata.Tag = "folder"
+		info = content.Metadata
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
 	return
 }
 

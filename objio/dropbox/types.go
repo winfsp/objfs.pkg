@@ -418,3 +418,7 @@ type sharingInfo struct {
 	TraverseOnly bool `json:"traverse_only"` // folders only
 	NoAccess     bool `json:"no_access"`     // folders only
 }
+
+type createFolderResult struct {
+	Metadata *dropboxObjectInfo `json:"metadata"`
+}
