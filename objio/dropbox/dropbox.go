@@ -442,10 +442,39 @@ func (self *dropbox) Mkdir(prefix string) (info objio.ObjectInfo, err error) {
 }
 
 func (self *dropbox) Rmdir(prefix string) (err error) {
-	return
+	return self.remove(prefix, true)
 }
 
 func (self *dropbox) Remove(name string) (err error) {
+	return self.remove(name, false)
+}
+
+func (self *dropbox) remove(name string, dir bool) (err error) {
+	var content = struct {
+		Path string `json:"path"`
+	}{
+		filePath(name),
+	}
+
+	var body bytes.Buffer
+	err = json.NewEncoder(&body).Encode(&content)
+	if nil != err {
+		return
+	}
+
+	dbr := dropboxRequest{
+		uri:      self.rpcUri,
+		path:     "/files/delete_v2",
+		body:     requestBody(&body),
+		apiError: &deleteV2ApiError{},
+	}
+	err = self.sendrecv(&dbr, func(rsp *http.Response) error {
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
 	return
 }
 
