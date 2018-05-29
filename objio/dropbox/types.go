@@ -224,6 +224,54 @@ func (e *listFolderContinueError) Errno() errno.Errno {
 	}
 }
 
+type moveV2ApiError struct {
+	baseApiError
+	Error *relocationError `json:"error"`
+}
+
+func (e *moveV2ApiError) Errno() errno.Errno {
+	switch {
+	case nil != e.Error:
+		return e.Error.Errno()
+	default:
+		return errno.EIO
+	}
+}
+
+type relocationError struct {
+	Tag        string       `json:".tag"`
+	FromLookup *lookupError `json:"from_lookup"`
+	FromWrite  *writeError  `json:"from_write"`
+	To         *writeError  `json:"to"`
+}
+
+func (e *relocationError) Errno() errno.Errno {
+	switch {
+	case nil != e.FromLookup:
+		return e.FromLookup.Errno()
+	case nil != e.FromWrite:
+		return e.FromWrite.Errno()
+	case nil != e.To:
+		return e.To.Errno()
+	case "cant_copy_shared_folder" == e.Tag:
+		return errno.EPERM
+	case "cant_nest_shared_folder" == e.Tag:
+		return errno.EINVAL
+	case "cant_move_folder_into_itself" == e.Tag:
+		return errno.EINVAL
+	case "too_many_files" == e.Tag:
+		return errno.ENOSPC
+	case "duplicated_or_nested_paths" == e.Tag:
+		return errno.EINVAL
+	case "cant_transfer_ownership" == e.Tag:
+		return errno.EPERM
+	case "insufficient_quota" == e.Tag:
+		return errno.ENOSPC //errno.EDQUOT
+	default:
+		return errno.EIO
+	}
+}
+
 type uploadApiError struct {
 	baseApiError
 	Error *uploadError `json:"error"`

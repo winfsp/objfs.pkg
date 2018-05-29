@@ -479,6 +479,33 @@ func (self *dropbox) remove(name string, dir bool) (err error) {
 }
 
 func (self *dropbox) Rename(oldname string, newname string) (err error) {
+	var content = struct {
+		FromPath string `json:"from_path"`
+		ToPath   string `json:"to_path"`
+	}{
+		filePath(oldname),
+		filePath(newname),
+	}
+
+	var body bytes.Buffer
+	err = json.NewEncoder(&body).Encode(&content)
+	if nil != err {
+		return
+	}
+
+	dbr := dropboxRequest{
+		uri:      self.rpcUri,
+		path:     "/files/move_v2",
+		body:     requestBody(&body),
+		apiError: &moveV2ApiError{},
+	}
+	err = self.sendrecv(&dbr, func(rsp *http.Response) error {
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
 	return
 }
 
