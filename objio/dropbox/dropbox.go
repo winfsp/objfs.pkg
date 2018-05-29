@@ -165,10 +165,16 @@ func (self *dropbox) sendrecv(dbr *dropboxRequest, fn func(*http.Response) error
 		header.Add("Authorization", creds.Get("token_type")+" "+creds.Get("access_token"))
 	}
 
+	method := "POST"
+	if "/files/download" == dbr.path && "" != header.Get("Range") {
+		// change to "GET" to allow for "Range" header
+		method = "GET"
+	}
+
 	uri := *dbr.uri
 	uri.Path = path.Join(uri.Path, dbr.path)
 	req := &http.Request{
-		Method:     "POST",
+		Method:     method,
 		URL:        &uri,
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
@@ -176,11 +182,6 @@ func (self *dropbox) sendrecv(dbr *dropboxRequest, fn func(*http.Response) error
 		Header:     header,
 		Host:       dbr.uri.Host,
 		Body:       dbr.body,
-	}
-
-	// change to "GET" to allow for "Range" header
-	if "/files/download" == dbr.path {
-		req.Method = "GET"
 	}
 
 	rsp, err := httputil.Retry(dbr.body, func() (*http.Response, error) {
@@ -512,6 +513,57 @@ func (self *dropbox) Rename(oldname string, newname string) (err error) {
 func (self *dropbox) OpenRead(
 	name string, sig string) (
 	info objio.ObjectInfo, reader io.ReadCloser, err error) {
+
+	var content = struct {
+		Path string `json:"path"`
+	}{
+		filePath(name),
+	}
+
+	arg, err := json.Marshal(&content)
+	if nil != err {
+		return
+	}
+
+	header := http.Header{}
+	header.Add("Dropbox-API-Arg", string(arg))
+	if "" != sig {
+		header.Add("If-None-Match", sig)
+	}
+
+	dbr := dropboxRequest{
+		uri:         self.contentUri,
+		path:        "/files/download",
+		header:      header,
+		noBodyClose: true,
+		apiError:    &downloadApiError{},
+	}
+	err = self.sendrecv(&dbr, func(rsp *http.Response) error {
+		if 200 != rsp.StatusCode {
+			defer rsp.Body.Close()
+
+			if 304 == rsp.StatusCode {
+				return nil
+			}
+
+			return errors.New("bad HTTP status", nil, errno.EIO)
+		}
+
+		var content dropboxObjectInfo
+		err := json.Unmarshal([]byte(rsp.Header.Get("Dropbox-API-Result")), &content)
+		if nil != err {
+			return err
+		}
+
+		content.Tag = "file"
+		info = &content
+		reader = rsp.Body
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
 	return
 }
 
