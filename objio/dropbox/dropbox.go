@@ -103,7 +103,7 @@ func (info *dropboxObjectInfo) Sig() string {
 	if info.IsDir() {
 		return ""
 	}
-	return "W/" + info.FRev
+	return fmt.Sprintf("W/\"%s\"", info.FRev)
 }
 
 type ioReadSeekCloser interface {
