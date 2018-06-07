@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/billziss-gh/golib/errors"
@@ -139,6 +140,214 @@ type dropboxRequest struct {
 	body        ioReadSeekCloser
 	noBodyClose bool
 	apiError    interface{}
+}
+
+const fragmentSize = 4 * 320 * 1024 // onedrive's base upload fragment size is 320KiB
+
+type dropboxWriter struct {
+	owner     *dropbox
+	name      string
+	size      int64
+	off       int64
+	sessionId string
+	body      bytes.Buffer
+	info      objio.ObjectInfo
+	mux       sync.Mutex
+}
+
+func (self *dropboxWriter) uploadSmall() (err error) {
+	endoff := self.off + int64(self.body.Len())
+
+	var content = commitInfo{
+		filePath(self.name),
+		"overwrite",
+	}
+
+	arg, err := json.Marshal(&content)
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+		return
+	}
+
+	header := http.Header{}
+	header.Add("Content-type", "application/octet-stream")
+	header.Add("Dropbox-API-Arg", string(arg))
+
+	dbr := dropboxRequest{
+		uri:      self.owner.contentUri,
+		path:     "/files/upload",
+		header:   header,
+		body:     requestBody(&self.body),
+		apiError: &uploadApiError{},
+	}
+	err = self.owner.sendrecv(&dbr, func(rsp *http.Response) error {
+		if 200 != rsp.StatusCode {
+			return errors.New("bad HTTP status", nil, errno.EIO)
+		}
+
+		var content dropboxObjectInfo
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+
+		content.Tag = "file"
+		self.info = &content
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+		return
+	}
+
+	self.off = endoff
+	self.body.Reset()
+	return
+}
+
+func (self *dropboxWriter) uploadLarge() (err error) {
+	endoff := self.off + int64(self.body.Len())
+
+	var state string
+	var content uploadSessionArg
+	var apiError interface{}
+
+	if "" == self.sessionId {
+		state = "start"
+		apiError = nil
+	} else if endoff < self.size {
+		state = "append_v2"
+		apiError = &uploadSessionAppendApiError{}
+		content.Cursor = &uploadSessionCursor{
+			self.sessionId,
+			uint64(self.off),
+		}
+	} else {
+		state = "finish"
+		apiError = &uploadSessionFinishApiError{}
+		content.Cursor = &uploadSessionCursor{
+			self.sessionId,
+			uint64(self.off),
+		}
+		content.Commit = &commitInfo{
+			filePath(self.name),
+			"overwrite",
+		}
+	}
+
+	arg, err := json.Marshal(&content)
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+		return
+	}
+
+	header := http.Header{}
+	header.Add("Content-type", "application/octet-stream")
+	header.Add("Dropbox-API-Arg", string(arg))
+
+	dbr := dropboxRequest{
+		uri:      self.owner.contentUri,
+		path:     "/files/upload_session/" + state,
+		header:   header,
+		body:     requestBody(&self.body),
+		apiError: apiError,
+	}
+	err = self.owner.sendrecv(&dbr, func(rsp *http.Response) error {
+		if 200 != rsp.StatusCode {
+			return errors.New("bad HTTP status", nil, errno.EIO)
+		}
+
+		switch state {
+		case "start":
+			var content struct {
+				SessionId string `json:"session_id"`
+			}
+			err := json.NewDecoder(rsp.Body).Decode(&content)
+			if nil != err {
+				return err
+			}
+			if "" != content.SessionId {
+				return errors.New("bad session id", nil, errno.EIO)
+			}
+			self.sessionId = content.SessionId
+		case "append_v2":
+		case "finish":
+			var content dropboxObjectInfo
+			err := json.NewDecoder(rsp.Body).Decode(&content)
+			if nil != err {
+				return err
+			}
+			content.Tag = "file"
+			self.info = &content
+		default:
+			panic("unknown state " + state)
+		}
+
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+		return
+	}
+
+	self.off = endoff
+	self.body.Reset()
+	return
+}
+
+func (self *dropboxWriter) Write(p []byte) (written int, err error) {
+	self.mux.Lock()
+	defer self.mux.Unlock()
+
+	for 0 != len(p) {
+		n := fragmentSize - self.body.Len()
+		if n > len(p) {
+			n = len(p)
+		}
+
+		self.body.Write(p[:n]) // bytes.(*Buffer).Write cannot fail
+		p = p[n:]
+
+		if fragmentSize == self.body.Len() && (0 != len(p) || "" != self.sessionId) {
+			err = self.uploadLarge()
+			if nil != err {
+				return
+			}
+		}
+
+		written += n
+	}
+
+	return
+}
+
+func (self *dropboxWriter) Close() (err error) {
+	self.mux.Lock()
+	defer self.mux.Unlock()
+
+	self.sessionId = ""
+	self.off = 0
+	self.body.Reset()
+	return nil
+}
+
+func (self *dropboxWriter) Wait() (info objio.ObjectInfo, err error) {
+	self.mux.Lock()
+	defer self.mux.Unlock()
+
+	if "" != self.sessionId {
+		if 0 != self.body.Len() {
+			err = self.uploadLarge()
+		}
+	} else {
+		err = self.uploadSmall()
+	}
+
+	if nil == err {
+		info = self.info
+	}
+
+	return
 }
 
 type dropbox struct {
@@ -575,6 +784,7 @@ func (self *dropbox) OpenRead(
 }
 
 func (self *dropbox) OpenWrite(name string, size int64) (writer objio.WriteWaiter, err error) {
+	writer = &dropboxWriter{owner: self, name: name, size: size}
 	return
 }
 

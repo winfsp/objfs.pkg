@@ -470,3 +470,18 @@ type sharingInfo struct {
 type createFolderResult struct {
 	Metadata *dropboxObjectInfo `json:"metadata"`
 }
+
+type uploadSessionArg struct {
+	Cursor *uploadSessionCursor `json:"cursor,omitempty"`
+	Commit *commitInfo          `json:"commit,omitempty"`
+}
+
+type uploadSessionCursor struct {
+	SessionId string `json:"session_id"`
+	Offset    uint64 `json:"offset"`
+}
+
+type commitInfo struct {
+	Path string `json:"path"`
+	Mode string `json:"mode"`
+}
