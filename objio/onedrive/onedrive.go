@@ -348,6 +348,7 @@ func (self *onedriveWriter) uploadLarge() (err error) {
 		var body bytes.Buffer
 		err = json.NewEncoder(&body).Encode(&content)
 		if nil != err {
+			err = errors.New("", err, errno.EIO)
 			return
 		}
 
@@ -719,6 +720,7 @@ func (self *onedrive) Mkdir(prefix string) (info objio.ObjectInfo, err error) {
 	var body bytes.Buffer
 	err = json.NewEncoder(&body).Encode(&content)
 	if nil != err {
+		err = errors.New("", err, errno.EIO)
 		return
 	}
 
@@ -880,6 +882,7 @@ func (self *onedrive) Rename(oldname string, newname string) (err error) {
 	var body bytes.Buffer
 	err = json.NewEncoder(&body).Encode(&newcontent)
 	if nil != err {
+		err = errors.New("", err, errno.EIO)
 		return
 	}
 

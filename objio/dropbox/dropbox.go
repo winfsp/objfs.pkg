@@ -309,6 +309,7 @@ func (self *dropbox) List(
 
 		err = json.NewEncoder(&body).Encode(&content)
 		if nil != err {
+			err = errors.New("", err, errno.EIO)
 			return
 		}
 	} else {
@@ -324,6 +325,7 @@ func (self *dropbox) List(
 
 		err = json.NewEncoder(&body).Encode(&content)
 		if nil != err {
+			err = errors.New("", err, errno.EIO)
 			return
 		}
 	}
@@ -375,6 +377,7 @@ func (self *dropbox) Stat(name string) (info objio.ObjectInfo, err error) {
 	var body bytes.Buffer
 	err = json.NewEncoder(&body).Encode(&content)
 	if nil != err {
+		err = errors.New("", err, errno.EIO)
 		return
 	}
 
@@ -410,6 +413,7 @@ func (self *dropbox) Mkdir(prefix string) (info objio.ObjectInfo, err error) {
 	var body bytes.Buffer
 	err = json.NewEncoder(&body).Encode(&content)
 	if nil != err {
+		err = errors.New("", err, errno.EIO)
 		return
 	}
 
@@ -460,6 +464,7 @@ func (self *dropbox) remove(name string, dir bool) (err error) {
 	var body bytes.Buffer
 	err = json.NewEncoder(&body).Encode(&content)
 	if nil != err {
+		err = errors.New("", err, errno.EIO)
 		return
 	}
 
@@ -491,6 +496,7 @@ func (self *dropbox) Rename(oldname string, newname string) (err error) {
 	var body bytes.Buffer
 	err = json.NewEncoder(&body).Encode(&content)
 	if nil != err {
+		err = errors.New("", err, errno.EIO)
 		return
 	}
 
@@ -522,6 +528,7 @@ func (self *dropbox) OpenRead(
 
 	arg, err := json.Marshal(&content)
 	if nil != err {
+		err = errors.New("", err, errno.EIO)
 		return
 	}
 
