@@ -107,6 +107,12 @@ func (info *dropboxObjectInfo) Sig() string {
 	return fmt.Sprintf("W/\"%s\"", info.FRev)
 }
 
+var rootDropboxObjectInfo = dropboxObjectInfo{
+	Tag:    "folder",
+	FName:  "/",
+	FMtime: time.Now(),
+}
+
 type ioReadSeekCloser interface {
 	io.Reader
 	io.Seeker
@@ -126,11 +132,11 @@ func requestBody(buf *bytes.Buffer) ioReadSeekCloser {
 }
 
 func filePath(p string) string {
+	p = path.Join("/", p)
 	if "/" == p {
-		return ""
+		p = ""
 	}
-
-	return path.Join("/", p)
+	return p
 }
 
 type dropboxRequest struct {
@@ -581,6 +587,10 @@ func (self *dropbox) Stat(name string) (info objio.ObjectInfo, err error) {
 		Path string `json:"path"`
 	}{
 		filePath(name),
+	}
+
+	if "" == content.Path {
+		return &rootDropboxObjectInfo, nil
 	}
 
 	var body bytes.Buffer
