@@ -266,7 +266,7 @@ func (self *dropboxWriter) uploadLarge() (err error) {
 			if nil != err {
 				return err
 			}
-			if "" != content.SessionId {
+			if "" == content.SessionId {
 				return errors.New("bad session id", nil, errno.EIO)
 			}
 			self.sessionId = content.SessionId
