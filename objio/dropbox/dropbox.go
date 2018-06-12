@@ -707,7 +707,9 @@ func (self *dropbox) Rename(oldname string, newname string) (err error) {
 	// Unfortunately DropBox does not provide a way to overwrite a file/directory
 	// that already exists. So we have to do it in 2 steps, which is obviously not
 	// atomic.
-	self.remove(newname, false)
+	if !strings.EqualFold(oldname, newname) {
+		self.remove(newname, false)
+	}
 
 	var content = struct {
 		FromPath string `json:"from_path"`
