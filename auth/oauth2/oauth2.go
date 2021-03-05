@@ -19,6 +19,7 @@ package oauth2
 
 import (
 	"encoding/json"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -237,20 +238,37 @@ func (self *oauth2) getAccessToken(
 	}
 	defer rsp.Body.Close()
 
-	rspOk := false
+	rspJson := false
+	rspForm := false
 	if 200 == rsp.StatusCode || 400 == rsp.StatusCode {
 		contentType := rsp.Header.Get("Content-type")
 		if strings.HasPrefix(contentType, "application/json") ||
 			strings.HasPrefix(contentType, "text/javascript") {
-			rspOk = true
+			rspJson = true
+		} else if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+			rspForm = true
 		}
 	}
-	if !rspOk {
+	if !rspJson && !rspForm {
 		return nil, errors.New(": bad HTTP status or content-type", nil, errno.EACCES)
 	}
 
 	ocreds := auth.CredentialMap{}
-	err = json.NewDecoder(rsp.Body).Decode(&ocreds)
+	if rspJson {
+		err = json.NewDecoder(rsp.Body).Decode(&ocreds)
+	} else if rspForm {
+		var b []byte
+		b, err = ioutil.ReadAll(rsp.Body)
+		if nil == err {
+			var v url.Values
+			v, err = url.ParseQuery(string(b))
+			if nil == err {
+				for k := range v {
+					ocreds[k] = v.Get(k)
+				}
+			}
+		}
+	}
 	if nil != err {
 		return nil, err
 	}
