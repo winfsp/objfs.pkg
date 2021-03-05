@@ -90,6 +90,38 @@ func (info *githubRepoInfo) Sig() string {
 	return ""
 }
 
+type githubRefInfo struct {
+	FRef    string `json:"ref"`
+	FObject struct {
+		FType string `json:"type"`
+		FSig  string `json:"sha"`
+	} `json:"object"`
+}
+
+func (info *githubRefInfo) Name() string {
+	return path.Base(info.FRef)
+}
+
+func (info *githubRefInfo) Size() int64 {
+	return 0
+}
+
+func (info *githubRefInfo) Btime() time.Time {
+	return time.Now().UTC()
+}
+
+func (info *githubRefInfo) Mtime() time.Time {
+	return time.Now().UTC()
+}
+
+func (info *githubRefInfo) IsDir() bool {
+	return true
+}
+
+func (info *githubRefInfo) Sig() string {
+	return info.FObject.FSig
+}
+
 type githubObjectInfo struct {
 	FName string `json:"name"`
 }
@@ -276,6 +308,50 @@ func (self *github) listRepos(
 func (self *github) listRefs(
 	repo string, imarker string, maxcount int) (
 	omarker string, infos []objio.ObjectInfo, err error) {
+
+	if "" == imarker {
+		imarker = "1"
+	}
+	if 0 == maxcount {
+		maxcount = -1
+	}
+
+	const per_page = 100
+	uri := *self.apiUri
+	uri.Path = path.Join(uri.Path, fmt.Sprintf("/repos/%s/git/matching-refs/heads/", repo))
+	uri.RawQuery = fmt.Sprintf("per_page=%d&page=%s", per_page, imarker)
+
+	ghr := githubRequest{
+		method: "GET",
+		uri:    &uri,
+	}
+	err = self.sendrecv(&ghr, func(rsp *http.Response) error {
+		var content []*githubRefInfo
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+		if per_page <= len(content) {
+			m, _ := strconv.Atoi(imarker)
+			omarker = strconv.Itoa(m + 1)
+		}
+		infos = make([]objio.ObjectInfo, len(content))
+		i := 0
+		for _, v := range content {
+			if maxcount == i {
+				omarker = ""
+				break
+			}
+			infos[i] = v
+			i++
+		}
+		infos = infos[:i]
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
 	return
 }
 
