@@ -91,15 +91,14 @@ func (info *githubRepoInfo) Sig() string {
 }
 
 type githubRefInfo struct {
-	FRef    string `json:"ref"`
-	FObject struct {
-		FType string `json:"type"`
-		FSig  string `json:"sha"`
-	} `json:"object"`
+	FName   string `json:"name"`
+	FCommit struct {
+		FSig string `json:"sha"`
+	} `json:"commit"`
 }
 
 func (info *githubRefInfo) Name() string {
-	return path.Base(info.FRef)
+	return info.FName
 }
 
 func (info *githubRefInfo) Size() int64 {
@@ -119,11 +118,14 @@ func (info *githubRefInfo) IsDir() bool {
 }
 
 func (info *githubRefInfo) Sig() string {
-	return info.FObject.FSig
+	return info.FCommit.FSig
 }
 
 type githubObjectInfo struct {
+	FType string `json:"type"`
 	FName string `json:"name"`
+	FSize int64  `json:"size"`
+	FSig  string `json:"sha"`
 }
 
 func (info *githubObjectInfo) Name() string {
@@ -131,23 +133,23 @@ func (info *githubObjectInfo) Name() string {
 }
 
 func (info *githubObjectInfo) Size() int64 {
-	return 0
+	return info.FSize
 }
 
 func (info *githubObjectInfo) Btime() time.Time {
-	return time.Time{}
+	return time.Now().UTC()
 }
 
 func (info *githubObjectInfo) Mtime() time.Time {
-	return time.Time{}
+	return time.Now().UTC()
 }
 
 func (info *githubObjectInfo) IsDir() bool {
-	return false
+	return "dir" == info.FType
 }
 
 func (info *githubObjectInfo) Sig() string {
-	return ""
+	return info.FSig
 }
 
 type ioReadSeekCloser interface {
@@ -318,7 +320,7 @@ func (self *github) listRefs(
 
 	const per_page = 100
 	uri := *self.apiUri
-	uri.Path = path.Join(uri.Path, fmt.Sprintf("/repos/%s/git/matching-refs/heads/", repo))
+	uri.Path = path.Join(uri.Path, fmt.Sprintf("/repos/%s/branches/", repo))
 	uri.RawQuery = fmt.Sprintf("per_page=%d&page=%s", per_page, imarker)
 
 	ghr := githubRequest{
@@ -355,9 +357,50 @@ func (self *github) listRefs(
 	return
 }
 
-func (self *github) listFiles(
-	repo string, ref string, path string, imarker string, maxcount int) (
+func (self *github) listObjects(
+	repo string, ref string, prefix string, imarker string, maxcount int) (
 	omarker string, infos []objio.ObjectInfo, err error) {
+
+	if 0 == maxcount {
+		maxcount = -1
+	}
+
+	uri := *self.apiUri
+	uri.Path = path.Join(uri.Path, fmt.Sprintf("/repos/%s/contents/%s", repo, prefix))
+	uri.RawQuery = fmt.Sprintf("ref=%s", ref)
+
+	header := http.Header{}
+	header.Add("Accept", "application/vnd.github.v3.object")
+
+	ghr := githubRequest{
+		method: "GET",
+		uri:    &uri,
+		header: header,
+	}
+	err = self.sendrecv(&ghr, func(rsp *http.Response) error {
+		var content struct {
+			Infos []*githubObjectInfo `json:"entries"`
+		}
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+		infos = make([]objio.ObjectInfo, len(content.Infos))
+		i := 0
+		for _, v := range content.Infos {
+			if maxcount == i {
+				break
+			}
+			infos[i] = v
+			i++
+		}
+		infos = infos[:i]
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
 	return
 }
 
@@ -378,7 +421,7 @@ func (self *github) List(
 		return self.listRefs(comp[0]+"/"+comp[1], imarker, maxcount)
 	} else {
 		// ref level: list files
-		return self.listFiles(comp[0]+"/"+comp[1], comp[2], strings.Join(comp[3:], "/"), imarker, maxcount)
+		return self.listObjects(comp[0]+"/"+comp[1], comp[2], strings.Join(comp[3:], "/"), imarker, maxcount)
 	}
 }
 
