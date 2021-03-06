@@ -59,6 +59,36 @@ func (self *githubStorageInfo) FreeSize() int64 {
 	return 0
 }
 
+type githubRootOrUserInfo struct {
+	FName  string    `json:"login"`
+	FBtime time.Time `json:"created_at"`
+	FMtime time.Time `json:"updated_at"`
+}
+
+func (info *githubRootOrUserInfo) Name() string {
+	return info.FName
+}
+
+func (info *githubRootOrUserInfo) Size() int64 {
+	return 0
+}
+
+func (info *githubRootOrUserInfo) Btime() time.Time {
+	return info.FBtime
+}
+
+func (info *githubRootOrUserInfo) Mtime() time.Time {
+	return info.FMtime
+}
+
+func (info *githubRootOrUserInfo) IsDir() bool {
+	return true
+}
+
+func (info *githubRootOrUserInfo) Sig() string {
+	return ""
+}
+
 type githubRepoInfo struct {
 	FName  string    `json:"name"`
 	FSize  int64     `json:"size"`
@@ -425,8 +455,129 @@ func (self *github) List(
 	}
 }
 
-func (self *github) Stat(name string) (info objio.ObjectInfo, err error) {
+func (self *github) statRoot() (info objio.ObjectInfo, err error) {
+	t := time.Now().UTC()
+	info = &githubRootOrUserInfo{FName: "/", FBtime: t, FMtime: t}
 	return
+}
+
+func (self *github) statUser(user string) (info objio.ObjectInfo, err error) {
+	uri := *self.apiUri
+	uri.Path = path.Join(uri.Path, fmt.Sprintf("/users/%s", user))
+
+	ghr := githubRequest{
+		method: "GET",
+		uri:    &uri,
+	}
+	err = self.sendrecv(&ghr, func(rsp *http.Response) error {
+		var content githubRootOrUserInfo
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+		info = &content
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
+	return
+}
+
+func (self *github) statRepo(repo string) (info objio.ObjectInfo, err error) {
+	uri := *self.apiUri
+	uri.Path = path.Join(uri.Path, fmt.Sprintf("/repos/%s", repo))
+
+	ghr := githubRequest{
+		method: "GET",
+		uri:    &uri,
+	}
+	err = self.sendrecv(&ghr, func(rsp *http.Response) error {
+		var content githubRepoInfo
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+		info = &content
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
+	return
+}
+
+func (self *github) statRef(repo string, ref string) (info objio.ObjectInfo, err error) {
+	uri := *self.apiUri
+	uri.Path = path.Join(uri.Path, fmt.Sprintf("/repos/%s/branches/%s", repo, ref))
+
+	ghr := githubRequest{
+		method: "GET",
+		uri:    &uri,
+	}
+	err = self.sendrecv(&ghr, func(rsp *http.Response) error {
+		var content githubRefInfo
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+		info = &content
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
+	return
+}
+
+func (self *github) statObject(repo string, ref string, name string) (info objio.ObjectInfo, err error) {
+	uri := *self.apiUri
+	uri.Path = path.Join(uri.Path, fmt.Sprintf("/repos/%s/contents/%s", repo, name))
+	uri.RawQuery = fmt.Sprintf("ref=%s", ref)
+
+	ghr := githubRequest{
+		method: "GET",
+		uri:    &uri,
+	}
+	err = self.sendrecv(&ghr, func(rsp *http.Response) error {
+		var content githubObjectInfo
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+		info = &content
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
+	return
+}
+
+func (self *github) Stat(name string) (info objio.ObjectInfo, err error) {
+
+	comp := strings.Split(strings.TrimPrefix(name, "/"), "/")
+
+	if 0 == len(comp) || (1 == len(comp) && "" == comp[0]) {
+		// top level
+		return self.statRoot()
+	} else if 1 == len(comp) {
+		// user level
+		return self.statUser(comp[0])
+	} else if 2 == len(comp) {
+		// repo level
+		return self.statRepo(comp[0] + "/" + comp[1])
+	} else if 3 == len(comp) {
+		// ref level
+		return self.statRef(comp[0]+"/"+comp[1], comp[2])
+	} else {
+		// object level
+		return self.statObject(comp[0]+"/"+comp[1], comp[2], strings.Join(comp[3:], "/"))
+	}
 }
 
 func (self *github) Mkdir(prefix string) (info objio.ObjectInfo, err error) {
