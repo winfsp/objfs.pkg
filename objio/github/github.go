@@ -26,6 +26,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/billziss-gh/golib/errors"
@@ -197,17 +198,44 @@ type githubRequest struct {
 }
 
 type githubReader struct {
+	owner *github
+	uri   *url.URL
+	body  io.ReadCloser
+	mux   sync.Mutex
 }
 
 func (self *githubReader) Read(p []byte) (n int, err error) {
-	return
-}
+	self.mux.Lock()
+	defer self.mux.Unlock()
 
-func (self *githubReader) ReadAt(p []byte, off int64) (n int, err error) {
+	if nil == self.body {
+		ghr := githubRequest{
+			method:      "GET",
+			uri:         self.uri,
+			noBodyClose: true,
+		}
+		err = self.owner.sendrecv(&ghr, func(rsp *http.Response) error {
+			self.body = rsp.Body
+			return nil
+		})
+		if nil != err {
+			err = errors.New("", err, errno.EIO)
+			return
+		}
+	}
+
+	n, err = self.body.Read(p)
 	return
 }
 
 func (self *githubReader) Close() (err error) {
+	self.mux.Lock()
+	defer self.mux.Unlock()
+
+	if nil != self.body {
+		err = self.body.Close()
+	}
+
 	return
 }
 
@@ -603,6 +631,47 @@ func (self *github) Rename(oldname string, newname string) (err error) {
 func (self *github) OpenRead(
 	name string, sig string) (
 	info objio.ObjectInfo, reader io.ReadCloser, err error) {
+
+	comp := strings.Split(strings.TrimPrefix(name, "/"), "/")
+
+	if 3 >= len(comp) {
+		err = errno.EISDIR
+		return
+	}
+
+	uri := *self.apiUri
+	uri.Path = path.Join(uri.Path,
+		fmt.Sprintf("/repos/%s/%s/contents/%s", comp[0], comp[1], strings.Join(comp[3:], "/")))
+	uri.RawQuery = fmt.Sprintf("ref=%s", comp[2])
+
+	ghr := githubRequest{
+		method: "GET",
+		uri:    &uri,
+	}
+	err = self.sendrecv(&ghr, func(rsp *http.Response) error {
+		var content struct {
+			githubObjectInfo
+			DownloadUrl string `json:"download_url"`
+		}
+
+		err := json.NewDecoder(rsp.Body).Decode(&content)
+		if nil != err {
+			return err
+		}
+
+		uri, err := url.Parse(content.DownloadUrl)
+		if "" == content.DownloadUrl || nil != err {
+			return errors.New("bad download_url", nil, errno.EIO)
+		}
+
+		info = &content.githubObjectInfo
+		reader = &githubReader{owner: self, uri: uri}
+		return nil
+	})
+	if nil != err {
+		err = errors.New("", err, errno.EIO)
+	}
+
 	return
 }
 
